@@ -6,6 +6,8 @@ import sys
 import requests
 import json
 import pysam
+import numpy as np
+import matplotlib.pyplot as plt
 
 pysam.set_verbosity(0)
 
@@ -88,19 +90,16 @@ def get_files_from_bucket(project, profile, files_path, files=None):
     del os.environ['http_proxy'] 
     del os.environ['https_proxy']
 
-def query(query):
-
-   query = {'query': query_txt}
-   output = requests.post('http://api.internal.io/v0/submission/graphql/', auth=auth, json=query).text
-   data = json.loads(output)  
-
-   return data
-
 def query_project_samples(project_id):
 
    query_txt = """query Test { sample (first:1000, project_id: "%s") {   
                                submitter_id}} """ % (project_id)
-   data = query(query_txt) 
+
+   query = {'query': query_txt}
+   # output = requests.post('http://api.internal.io/v0/submission/graphql/', json=query, headers={'X-Auth-Token': 'test'}).text
+   output = requests.post('http://api.internal.io/v0/submission/graphql/', auth=auth, json=query).text
+
+   data = json.loads(output)   
 
    return data
 
@@ -114,7 +113,10 @@ def query_sample(project_id, sample_id):
                                _submitted_aligned_reads_files_count submitted_aligned_reads_files { file_name}
                                _submitted_copy_number_count submitted_copy_number { file_name}} } }} """ % (project_id, sample_id)
 
-   data = query(query_txt)  
+   query = {'query': query_txt}
+   # output = requests.post('http://api.internal.io/v0/submission/graphql/', json=query, headers={'X-Auth-Token': 'test'}).text
+   output = requests.post('http://api.internal.io/v0/submission/graphql/', auth=auth, json=query).text
+   data = json.loads(output)   
 
    return data
 
@@ -134,7 +136,10 @@ def query_experimental_metadata(project_id):
    query_txt = """query Test { experiment (project_id: "%s") {   
                                experiment_metadata_files{file_name}}} """ % (project_id)
 
-   data = query(query_txt) 
+   query = {'query': query_txt}
+   # output = requests.post('http://api.internal.io/v0/submission/graphql/', json=query, headers={'X-Auth-Token': 'test'}).text
+   output = requests.post('http://api.internal.io/v0/submission/graphql/', auth=auth, json=query).text
+   data = json.loads(output)   
 
    return data
 
@@ -157,7 +162,10 @@ def query_sample(project_id, sample_id):
                                _submitted_aligned_reads_files_count submitted_aligned_reads_files { file_name}
                                _submitted_copy_number_count submitted_copy_number { file_name}} } }} """ % (project_id, sample_id)
 
-   data = query(query_txt)   
+   query = {'query': query_txt}
+   # output = requests.post('http://api.internal.io/v0/submission/graphql/', json=query, headers={'X-Auth-Token': 'test'}).text
+   output = requests.post('http://api.internal.io/v0/submission/graphql/', auth=auth, json=query).text
+   data = json.loads(output)   
 
    return data
 
@@ -167,8 +175,10 @@ def query_expectations(project_id, sample_id=None):
       query_txt = """query Test { sample (project_id: "%s", submitter_id: "%s") { submitter_id  _sample_expectations_count sample_expectations(first:100) { expected_mutation_chromosome expected_mutation_position }}}""" % (project_id, sample_id)
    else:
       query_txt = """query Test { sample (project_id: "%s") { submitter_id  _sample_expectations_count sample_expectations(first:100) { expected_mutation_chromosome expected_mutation_position }}}""" % (project_id)    
-
-   data = query(query_txt)  
+   query = {'query': query_txt}
+   # output = requests.post('http://api.internal.io/v0/submission/graphql/', json=query, headers={'X-Auth-Token': 'test'}).text
+   output = requests.post('http://api.internal.io/v0/submission/graphql/', auth=auth, json=query).text
+   data = json.loads(output)   
 
    return data
 
@@ -350,6 +360,39 @@ def calculate_metrics_all_vcf(project, path, vcfs_files, baseline_vcf=None):
 
     table = MetricsTable(data_results)
 
-    return table   
+    return table, data_results   
 
-                 
+def plot_metrics(data_metrics, data_filter_metrics=None):
+    
+    N = len(data_metrics)
+    files         = [m['VCF File'] for m in data_metrics]
+    sens_values   = [m['Sensitivity'] for m in data_metrics] 
+    spec_values   = [m['Specificity'] for m in data_metrics]
+    ind = np.arange(N) # the x locations for the groups
+    width = 0.35       # the width of the bars
+    
+    if data_filter_metrics != None:
+        f_sens_values = [m['Sensitivity'] for m in data_filter_metrics] 
+        f_spec_values = [m['Specificity'] for m in data_filter_metrics] 
+        ind = 2*ind
+
+
+    fig, ax = plt.subplots(figsize=(15, 10))
+    rects1 = ax.bar(ind, sens_values, width, color='#b0e0e6')
+    rects2 = ax.bar(ind + width, spec_values, width, color='#87cefa')
+    rects = (rects1, rects2)
+    labels = ('Sensitivity', 'Specificity')
+    if data_filter_metrics != None: 
+        rects3 = ax.bar(ind + 2*width, f_sens_values, width, color='#4682b4')
+        rects4 = ax.bar(ind + 3*width, f_spec_values, width, color='#0000cd')
+        rects = (rects1, rects2, rects3, rects4)
+        labels = ('Sensitivity', 'Specificity', 'Germline-filtering Sensitivity', 'Germline-filtering Specificity')
+        
+    # add some text for labels, title and axes ticks
+    ax.set_ylabel('Metrics')
+    ax.set_title('Specificity/Sensitivity Analysis')
+    ax.set_xticks(ind + width)
+    ax.set_xticklabels(files, rotation=90)
+
+    ax.legend(rects, labels, loc='center left', bbox_to_anchor=(1, 0.5))
+    plt.show()    
