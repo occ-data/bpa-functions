@@ -11,15 +11,15 @@ import matplotlib.pyplot as plt
 
 pysam.set_verbosity(0)
 
-with open('.secrets','r') as f:
-    secrets = json.load(f)
-auth = get_auth(secrets['access_key'], secrets['secret_key'], 'submission')
+auth = ''
 
-expectation_files = {'sample_expectation':
-        ['sample-expectation.tsv',
-         'sample_expectation.tsv',
-         'sample-expectations.tsv',
-         'sample_expectations.tsv']}
+expectation_files = {
+    'sample_expectation':
+              ['sample-expectation.tsv',
+              'sample_expectation.tsv',
+              'sample-expectations.tsv',
+              'sample_expectations.tsv']
+}
 
 main_header_order = [
     'VCF File',
@@ -30,15 +30,20 @@ main_header_order = [
     'Specificity'
 ]
 
-data_types = { 'VCF': 'submitted_somatic_mutations',
-'FASTQ': 'submitted_unaligned_reads_files',
-'BAM': 'submitted_aligned_reads_files',
-'CNV': 'submitted_copy_number' }
-
-metadata_types = { 'METADATA': 'experiment_metadata_files'  
+data_types = {
+    'VCF': 'submitted_somatic_mutations',
+    'FASTQ': 'submitted_unaligned_reads_files',
+    'BAM': 'submitted_aligned_reads_files',
+    'CNV': 'submitted_copy_number' 
 }
 
+metadata_types = {
+    'METADATA': 'experiment_metadata_files'
+}
+
+
 class MetricsTable(list):
+    ''' Represent result tables in HTML format for visualization '''
     
     def _repr_html_(self):
         html = []
@@ -57,17 +62,31 @@ class MetricsTable(list):
         return ''.join(html)
 
 
-def get_files_from_bucket(project, profile, files_path, files=None):
+def add_keys(filename):
+    ''' Get auth from our secret keys '''
 
+    global auth 
+    with open(filename,'r') as f:
+        secrets = json.load(f)
+    auth = get_auth(secrets['access_key'], secrets['secret_key'], 'submission')
+
+
+def get_files_from_bucket(project, profile, files_path, files=None):
+    ''' Transfer data from object storage to the VM in the private subnet '''
+
+    # Define proxys
     os.environ['http_proxy'] = 'http://cloud-proxy.internal.io:3128' 
     os.environ['https_proxy'] = 'https://cloud-proxy.internal.io:3128'
 
+    # Create folder
     if not os.path.exists(files_path):
        os.makedirs(files_path)
 
+    # Get bucket name and path
     bucket_name = project.replace('bpa-', 'BPA_')
     s3_path = 's3://bpa-data/' + bucket_name
 
+    # Getting files
     print "Getting files..."
     if files:
        for f in files:
@@ -87,102 +106,117 @@ def get_files_from_bucket(project, profile, files_path, files=None):
           print "ERROR:" + output
     print "Finished"
 
+    # Unset proxies
     del os.environ['http_proxy'] 
     del os.environ['https_proxy']
 
-def query_project_samples(project_id):
 
-   query_txt = """query Test { sample (first:1000, project_id: "%s") {   
+def query_api(query_txt):
+    ''' Request results for a specific query '''
+
+    query = {'query': query_txt}
+    output = requests.post('http://api.internal.io/v0/submission/graphql/', auth=auth, json=query).text
+    data = json.loads(output) 
+
+    return data
+
+
+def query_project_samples(project_id):
+    ''' Query samples for a specific project'''
+
+    query_txt = """query Test { sample (first:1000, project_id: "%s") {
                                submitter_id}} """ % (project_id)
 
-   query = {'query': query_txt}
-   # output = requests.post('http://api.internal.io/v0/submission/graphql/', json=query, headers={'X-Auth-Token': 'test'}).text
-   output = requests.post('http://api.internal.io/v0/submission/graphql/', auth=auth, json=query).text
+    data = query_api(query_txt)   
 
-   data = json.loads(output)   
+    return data
 
-   return data
 
 def query_sample(project_id, sample_id):
+    ''' Query alignment files from one sample'''
 
-   query_txt = """query Test { sample (project_id: "%s", submitter_id: "%s") {   
-                               submitter_id _aliquots_count aliquots { 
+    query_txt = """query Test { sample (project_id: "%s", submitter_id: "%s") {
+                               submitter_id _aliquots_count aliquots {
                                aliquot_concentration  _read_groups_count read_groups {
                                _submitted_somatic_mutations_count submitted_somatic_mutations { file_name} 
                                _submitted_unaligned_reads_files_count submitted_unaligned_reads_files { file_name} 
                                _submitted_aligned_reads_files_count submitted_aligned_reads_files { file_name}
                                _submitted_copy_number_count submitted_copy_number { file_name}} } }} """ % (project_id, sample_id)
 
-   query = {'query': query_txt}
-   # output = requests.post('http://api.internal.io/v0/submission/graphql/', json=query, headers={'X-Auth-Token': 'test'}).text
-   output = requests.post('http://api.internal.io/v0/submission/graphql/', auth=auth, json=query).text
-   data = json.loads(output)   
+    data = query_api(query_txt)   
 
-   return data
+    return data
+
 
 def list_samples(project_id):
+    ''' Retrieve samples included in one specific project'''
 
-   sample_data = query_project_samples(project_id)
+    sample_data = query_project_samples(project_id)
 
-   samples = []
-   for s in sample_data["data"]["sample"]:
-       samples.append(s['submitter_id'].encode('ascii'))
+    samples = []
+    for s in sample_data["data"]["sample"]:
+      samples.append(s['submitter_id'].encode('ascii'))
 
-   return samples       
+    return samples       
 
 
 def query_experimental_metadata(project_id):
+    ''' Query experimental metadata files from a specific project '''
 
-   query_txt = """query Test { experiment (project_id: "%s") {   
+
+    query_txt = """query Test { experiment (project_id: "%s") {   
                                experiment_metadata_files{file_name}}} """ % (project_id)
 
-   query = {'query': query_txt}
-   # output = requests.post('http://api.internal.io/v0/submission/graphql/', json=query, headers={'X-Auth-Token': 'test'}).text
-   output = requests.post('http://api.internal.io/v0/submission/graphql/', auth=auth, json=query).text
-   data = json.loads(output)   
+    data = query_api(query_txt)   
 
-   return data
+    return data
+
 
 def query_project(project_id):
+    ''' Retrieve all sample data for one specific project '''
 
-   data = query_project_samples(project_id)
-   for s in data['data']['sample']:
+
+    data = query_project_samples(project_id)
+    for s in data['data']['sample']:
       sample = query_sample(project_id, s['submitter_id'])
       s.update(sample['data']['sample'][0])
  
-   return data
+    return data
 
-def query_sample(project_id, sample_id):
-
-   query_txt = """query Test { sample (project_id: "%s", submitter_id: "%s") {   
-                               submitter_id _aliquots_count aliquots { 
-                               aliquot_concentration  _read_groups_count read_groups {
-                               _submitted_somatic_mutations_count submitted_somatic_mutations { file_name} 
-                               _submitted_unaligned_reads_files_count submitted_unaligned_reads_files { file_name} 
-                               _submitted_aligned_reads_files_count submitted_aligned_reads_files { file_name}
-                               _submitted_copy_number_count submitted_copy_number { file_name}} } }} """ % (project_id, sample_id)
-
-   query = {'query': query_txt}
-   # output = requests.post('http://api.internal.io/v0/submission/graphql/', json=query, headers={'X-Auth-Token': 'test'}).text
-   output = requests.post('http://api.internal.io/v0/submission/graphql/', auth=auth, json=query).text
-   data = json.loads(output)   
-
-   return data
 
 def query_expectations(project_id, sample_id=None):
+    ''' Retrieve all expected mutations for one sample or one project'''
 
-   if sample_id:
-      query_txt = """query Test { sample (project_id: "%s", submitter_id: "%s") { submitter_id  _sample_expectations_count sample_expectations(first:100) { expected_mutation_chromosome expected_mutation_position }}}""" % (project_id, sample_id)
-   else:
-      query_txt = """query Test { sample (project_id: "%s") { submitter_id  _sample_expectations_count sample_expectations(first:100) { expected_mutation_chromosome expected_mutation_position }}}""" % (project_id)    
-   query = {'query': query_txt}
-   # output = requests.post('http://api.internal.io/v0/submission/graphql/', json=query, headers={'X-Auth-Token': 'test'}).text
-   output = requests.post('http://api.internal.io/v0/submission/graphql/', auth=auth, json=query).text
-   data = json.loads(output)   
+    if sample_id:
+      query_txt = """query Test { 
+                          sample (project_id: "%s", submitter_id: "%s") { 
+                              submitter_id 
+                              _sample_expectations_count 
+                              sample_expectations(first:100) { 
+                                  expected_mutation_chromosome 
+                                  expected_mutation_position 
+                              }
+                          }
+                    }""" % (project_id, sample_id)
+    else:
+      query_txt = """query Test { 
+                          sample (project_id: "%s") { 
+                              submitter_id  
+                              _sample_expectations_count
+                              sample_expectations(first:100) { 
+                                  expected_mutation_chromosome 
+                                  expected_mutation_position 
+                              }
+                          }
+                    }""" % (project_id)    
 
-   return data
+    data = query_api(query_txt) 
+
+    return data
+
 
 def search_files(query_data, file_type):
+    ''' Retrieve file names from a sample query result'''
 
     node = data_types[file_type.upper()]
 
@@ -200,7 +234,9 @@ def search_files(query_data, file_type):
 
     return files
 
+
 def search_metadata(query_data, file_type):
+    ''' Retrieve file names from an experimental metadata query result'''
 
     node = metadata_types[file_type.upper()]
 
@@ -213,7 +249,9 @@ def search_metadata(query_data, file_type):
 
     return files
 
+
 def list_files_by_type(project_id, file_type, sample_id=None):
+    ''' Retrieve file names in the project/sample of a specific type'''
 
     file_type = file_type.upper()
 
@@ -229,8 +267,10 @@ def list_files_by_type(project_id, file_type, sample_id=None):
     
     return files   
 
+
 def list_files(project_id, sample_id=None):
- 
+    ''' Retrieve all file names associated to a project/sample''' 
+
     if sample_id:
       data = query_sample(project_id, sample_id)  
       files = []
@@ -255,7 +295,10 @@ def list_files(project_id, sample_id=None):
 
     return files
 
+
 def count_file_types(project_id, sample_id=None):
+    ''' Count file types associated to a project/sample ''' 
+
 
     data_files = list_files(project_id, sample_id)
     count_files = dict()
@@ -270,6 +313,8 @@ def count_file_types(project_id, sample_id=None):
 
 
 def get_expected_mutations(project_id, sample_id=None):
+    ''' Retrieve expected mutation from an expectation query ''' 
+
 
     data = query_expectations(project_id, sample_id)
 
@@ -284,12 +329,14 @@ def get_expected_mutations(project_id, sample_id=None):
 
     return expectations
 
+
 def find_germlines(expectations, baseline):
+    ''' Find potential germline variants from a baseline vcf (unexpected somatic variants) ''' 
 
-  vcf_back = pysam.VariantFile(baseline, 'rb') 
+    vcf_back = pysam.VariantFile(baseline, 'rb') 
 
-  for rec in vcf_back.fetch():
-     if 'PASS' in rec.filter:  
+    for rec in vcf_back.fetch():
+      if 'PASS' in rec.filter:  
         chrom = rec.chrom.replace('chr', '')
         pos   = str(rec.pos)
         ref   = rec.alleles[0]
@@ -300,26 +347,28 @@ def find_germlines(expectations, baseline):
               pos == var['expected_mutation_position']:
                  expectations.remove(var)
 
-  return expectations
+    return expectations
+
 
 def calculate_metrics_vcf(project, path, vcf_name, sample, baseline_vcf=None):
+    ''' Calculate sensitivity/specificity for one VCF file and its corresponding expectations ''' 
 
-  data = {'VCF File': '', 'Expectations': 0, 'True-Positive': 0, 'False-Positive': 0, 'Sensitivity': 0.0 , 'Specificity': 0.0}
-  vcf_path = path + vcf_name
-  vcf_in = pysam.VariantFile(vcf_path, 'rb') 
+    data = {'VCF File': '', 'Expectations': 0, 'True-Positive': 0, 'False-Positive': 0, 'Sensitivity': 0.0 , 'Specificity': 0.0}
+    vcf_path = path + vcf_name
+    vcf_in = pysam.VariantFile(vcf_path, 'rb') 
 
-  expectations = get_expected_mutations(project, sample)
-  if not expectations:
+    expectations = get_expected_mutations(project, sample)
+    if not expectations:
       print "ERROR: There are no expected mutations for this project or sample" 
 
-  sample_expectations = [e for e in expectations if e['sample_id'] == sample]
-  if baseline_vcf:
-     sample_expectations = find_germlines(sample_expectations, path + baseline_vcf)  
+    sample_expectations = [e for e in expectations if e['sample_id'] == sample]
+    if baseline_vcf:
+      sample_expectations = find_germlines(sample_expectations, path + baseline_vcf)  
 
-  TP = 0
-  FP = 0
-  for rec in vcf_in.fetch():
-    if 'PASS' in rec.filter and float(rec.info['MAF'][0]) < 0.1:  
+    TP = 0
+    FP = 0
+    for rec in vcf_in.fetch():
+      if 'PASS' in rec.filter and float(rec.info['MAF'][0]) < 0.1:  
         chrom = rec.chrom.replace('chr', '')
         pos   = str(rec.pos)
         ref   = rec.alleles[0]
@@ -339,18 +388,20 @@ def calculate_metrics_vcf(project, path, vcf_name, sample, baseline_vcf=None):
         else:
               FP += 1
 
-  P  = len(sample_expectations)
-  TN = 169 - (TP + FP)
-  data['VCF File'] = vcf_name
-  data['Expectations'] = P
-  data['True-Positive'] = TP
-  data['False-Positive'] = FP
-  data['Sensitivity'] = round(float(TP)/float(P), 3)
-  data['Specificity'] = round(float(TN)/float(TN+FP),3)         
+    P  = len(sample_expectations)
+    TN = 169 - (TP + FP)
+    data['VCF File'] = vcf_name
+    data['Expectations'] = P
+    data['True-Positive'] = TP
+    data['False-Positive'] = FP
+    data['Sensitivity'] = round(float(TP)/float(P), 3)
+    data['Specificity'] = round(float(TN)/float(TN+FP),3)         
   
-  return data
+    return data
 
 def calculate_metrics_all_vcf(project, path, vcfs_files, baseline_vcf=None):
+    ''' Calculate sensitivity/specificity for a set of VCF files and create a table ''' 
+
     data_results = []
 
     for sample in vcfs_files: 
@@ -362,7 +413,9 @@ def calculate_metrics_all_vcf(project, path, vcfs_files, baseline_vcf=None):
 
     return table, data_results   
 
+
 def plot_metrics(data_metrics, data_filter_metrics=None):
+    ''' Plot table results in a barplot ''' 
     
     N = len(data_metrics)
     files         = [m['VCF File'] for m in data_metrics]
