@@ -71,12 +71,8 @@ def add_keys(filename):
     auth = get_auth(secrets['access_key'], secrets['secret_key'], 'submission')
 
 
-def get_files_from_bucket(project, profile, files_path, files=None):
+def get_files_from_bucket(project, profile, files_path, include_type=None):
     ''' Transfer data from object storage to the VM in the private subnet '''
-
-    # Define proxys
-    os.environ['http_proxy'] = 'http://cloud-proxy.internal.io:3128' 
-    os.environ['https_proxy'] = 'https://cloud-proxy.internal.io:3128'
 
     # Create folder
     if not os.path.exists(files_path):
@@ -88,27 +84,16 @@ def get_files_from_bucket(project, profile, files_path, files=None):
 
     # Getting files
     print "Getting files..."
-    if files:
-       for f in files:
-          s3_path = s3_path + '/' + f
-          cmd = ['aws', 's3', 'cp', s3_path, files_path, '--profile', profile]
-          try:
-              output = subprocess.check_output(cmd, stderr=subprocess.STDOUT)       
-          except Exception as e:
-              output = e.output
-              print "ERROR:" + output          
-    else: 
-       cmd = ['aws', 's3', 'sync', s3_path, files_path, '--profile', profile]
-       try:
-          output = subprocess.check_output(cmd, stderr=subprocess.STDOUT)       
-       except Exception as e:
-          output = e.output
-          print "ERROR:" + output
+    cmd = ['aws', 's3', 'sync', s3_path, files_path, '--profile', profile]
+    if include_type:
+       cmd = cmd + ['--exclude', '*', '--include' , include_type]
+    
+    try:
+        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT)       
+    except Exception as e:
+        output = e.output
+        print "ERROR:" + output
     print "Finished"
-
-    # Unset proxies
-    del os.environ['http_proxy'] 
-    del os.environ['https_proxy']
 
 
 def query_api(query_txt):
