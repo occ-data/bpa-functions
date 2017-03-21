@@ -13,14 +13,6 @@ pysam.set_verbosity(0)
 
 auth = ''
 
-expectation_files = {
-    'sample_expectation':
-              ['sample-expectation.tsv',
-              'sample_expectation.tsv',
-              'sample-expectations.tsv',
-              'sample_expectations.tsv']
-}
-
 main_header_order = [
     'VCF File',
     'Expectations',
@@ -34,7 +26,7 @@ data_types = {
     'VCF': 'submitted_somatic_mutations',
     'FASTQ': 'submitted_unaligned_reads_files',
     'BAM': 'submitted_aligned_reads_files',
-    'CNV': 'submitted_copy_number' 
+    'CNV': 'submitted_copy_number_files' 
 }
 
 metadata_types = {
@@ -103,6 +95,9 @@ def query_api(query_txt):
     output = requests.post('http://api.internal.io/v0/submission/graphql/', auth=auth, json=query).text
     data = json.loads(output) 
 
+    if 'errors' in data:
+        print data    
+    
     return data
 
 
@@ -126,7 +121,7 @@ def query_sample(project_id, sample_id):
                                _submitted_somatic_mutations_count submitted_somatic_mutations { file_name} 
                                _submitted_unaligned_reads_files_count submitted_unaligned_reads_files { file_name} 
                                _submitted_aligned_reads_files_count submitted_aligned_reads_files { file_name}
-                               _submitted_copy_number_count submitted_copy_number { file_name}} } }} """ % (project_id, sample_id)
+                               _submitted_copy_number_files_count submitted_copy_number_files { file_name}} } }} """ % (project_id, sample_id)
 
     data = query_api(query_txt)   
 
