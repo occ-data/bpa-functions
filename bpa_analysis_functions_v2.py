@@ -139,8 +139,6 @@ def query_summary_field(node, field, project_id=None):
     
     summary = {}
     for p in projects:
-               
-        print p
         
         query_txt = """query { %s(first:0, project_id: "%s") {%s}} """ % (node, p["project_id"], field) 
         
