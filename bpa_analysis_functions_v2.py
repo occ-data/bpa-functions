@@ -95,8 +95,8 @@ def query_api(query_txt):
     output = requests.post('http://api.internal.io/v0/submission/graphql/', auth=auth, json=query).text
     data = json.loads(output) 
 
-    if 'errors' in data:
-        print data    
+    if 'data' not in data and 'errors' in data:
+        print query    
     
     return data
 
@@ -127,6 +127,61 @@ def query_sample(project_id, sample_id):
 
     return data
 
+
+def query_summary_field(node, field, project_id=None):
+    ''' Query summary counts for each data type '''
+    
+    if project_id == None:
+        query_txt = """ query {project{project_id}}"""
+        projects = query_api(query_txt)['data']['project']    
+    else:
+        projects = [{"project_id": project_id}]
+    
+    summary = {}
+    for p in projects:
+               
+        query_txt = """query { %s(first:0, project_id: "%s") {%s}} """ % (node, p["project_id"], field) 
+        
+        data = query_api(query_txt)
+
+        name = p["project_id"]
+        summary[name] = {}
+        for d in data['data'][node]:
+            
+            summary[name].setdefault(str(d[field]), 0)        
+            summary[name][str(d[field])] += 1
+    
+    # plot_summary(summary, field, project_id)
+    
+    return summary
+
+
+def plot_summary(summary_counts, field, project_id):
+    ''' Plot summary results in a barplot ''' 
+    
+    N = len(summary_counts[project_id])
+
+    values = []
+    types = []
+    for n in sorted(summary_counts[project_id]):
+        values.append(summary_counts[project_id][n])
+        types.append(n)
+        
+    positions = np.arange(N)        
+    plt.figure(figsize=(2*N, N))   
+    
+    size_prop = (N/10) + 1
+    plt.barh(positions, values, 0.2, align='center', alpha=0.5, color='b')
+    plt.title('Summary counts by (' + field + ')', fontsize=10*size_prop)
+    plt.xlabel('COUNTS', fontsize=10*size_prop)    
+    plt.ylabel(field.upper(), fontsize=10*size_prop)  
+    plt.yticks(positions, types, fontsize=10*size_prop)    
+    
+    for i, v in enumerate(values):
+        plt.text(v, i, str(v), color='red', fontweight='bold', fontsize=10*size_prop)
+    
+    plt.show()
+    
 
 def list_samples(project_id):
     ''' Retrieve samples included in one specific project'''
