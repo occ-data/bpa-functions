@@ -132,7 +132,7 @@ def query_summary_field(node, field, project_id=None):
     ''' Query summary counts for each data type '''
     
     if project_id == None:
-        query_txt = """ query {project{project_id}}"""
+        query_txt = """ query {project(first:0){project_id}}"""
         projects = query_api(query_txt)['data']['project']    
     else:
         projects = [{"project_id": project_id}]
@@ -140,6 +140,8 @@ def query_summary_field(node, field, project_id=None):
     summary = {}
     for p in projects:
                
+        print p
+        
         query_txt = """query { %s(first:0, project_id: "%s") {%s}} """ % (node, p["project_id"], field) 
         
         data = query_api(query_txt)
@@ -151,7 +153,8 @@ def query_summary_field(node, field, project_id=None):
             summary[name].setdefault(str(d[field]), 0)        
             summary[name][str(d[field])] += 1
     
-    # plot_summary(summary, field, project_id)
+    if len(projects) == 1:
+        plot_summary(summary, field, project_id)
     
     return summary
 
