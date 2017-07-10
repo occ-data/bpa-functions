@@ -92,7 +92,7 @@ def query_api(query_txt):
     ''' Request results for a specific query '''
 
     query = {'query': query_txt}
-    output = requests.post('http://api.internal.io/v0/submission/graphql/', auth=auth, json=query).text
+    output = requests.post('http://kubenode.internal.io:30004/v0/submission/graphql/', auth=auth, json=query).text
     data = json.loads(output) 
 
     if 'data' not in data and 'errors' in data:
@@ -104,7 +104,7 @@ def query_api(query_txt):
 def query_project_samples(project_id):
     ''' Query samples for a specific project'''
 
-    query_txt = """query Test { sample (first:1000, project_id: "%s") {
+    query_txt = """query Test { sample (first:0, project_id: "%s") {
                                submitter_id}} """ % (project_id)
 
     data = query_api(query_txt)   
@@ -144,28 +144,33 @@ def query_summary_field(node, field, project_id=None):
         
         data = query_api(query_txt)
 
-        name = p["project_id"]
-        summary[name] = {}
+        project = p["project_id"]
         for d in data['data'][node]:
+          
+            field_name = str(d[field])
+            if field_name not in summary:
+                summary[field_name] = {} 
             
-            summary[name].setdefault(str(d[field]), 0)        
-            summary[name][str(d[field])] += 1
+            summary[field_name].setdefault(project, 0)                 
+            summary[field_name][project] += 1
     
-    if len(projects) == 1:
-        plot_summary(summary, field, project_id)
+    plot_summary(summary, field)
     
     return summary
 
 
-def plot_summary(summary_counts, field, project_id):
+def plot_summary(summary_counts, field):
     ''' Plot summary results in a barplot ''' 
     
-    N = len(summary_counts[project_id])
+    N = len(summary_counts)
 
     values = []
     types = []
-    for n in sorted(summary_counts[project_id]):
-        values.append(summary_counts[project_id][n])
+    for n in sorted(summary_counts):
+        value = 0
+        for p in summary_counts[n]:
+            value += summary_counts[n][p]
+        values.append(value)
         types.append(n)
         
     positions = np.arange(N)        
@@ -191,7 +196,7 @@ def list_samples(project_id):
 
     samples = []
     for s in sample_data["data"]["sample"]:
-      samples.append(s['submitter_id'].encode('ascii'))
+        samples.append(s['submitter_id'].encode('ascii'))
 
     return samples       
 
