@@ -8,12 +8,14 @@ import json
 import pysam
 import numpy as np
 import matplotlib.pyplot as plt
+from operator import add
 
 pysam.set_verbosity(0)
 
 auth = ''
 
 main_header_order = [
+    'Sample',
     'VCF File',
     'Expectations',
     'True-Positive',
@@ -34,6 +36,59 @@ metadata_types = {
 }
 
 
+class arrayTable(list):
+    ''' Represent result arrays in HTML format for visualization '''
+        
+    def _repr_html_(self):
+        html = []
+        html.append("<table style>")
+        for value in self:
+            html.append("<tr>") 
+            html.append("<td>%s</td>" % value)
+            html.append("<tr>") 
+        html.append("</table>")        
+        
+        return ''.join(html)
+
+class SummaryTable(dict):
+    ''' Represent result tables in HTML format for visualization '''
+        
+    def _repr_html_(self):
+        html = []
+        html.append("<table style>")
+        html.append("<thead>")
+        headers = []
+        for key in self:
+            for field in self[key]:
+                if type(field) is dict: 
+                    if field not in headers:
+                        headers.append(field)
+                        html.append("<th>%s</th>" % (field))
+        if not headers:
+            html.append("<th>%s</th>" % (main_header_order[0]))
+            html.append("<th>%s</th>" % (main_header_order[1]))        
+        html.append("</thead>")
+        for key in self:             
+            if headers:
+                html.append("<tr>")
+                html.append("<td>%s</td>" % key)
+                for h in headers:
+                    if h in self[key]:
+                        html.append("<td>%s</td>" % str(self[key][h])) 
+                    else:
+                        html.append("<td>0</td>")
+                html.append("</tr>")         
+            else:
+                for value in self[key]:
+                    html.append("<tr>")
+                    html.append("<td>%s</td>" % key)
+                    html.append("<td>%s</td>" % str(value))
+                    html.append("</tr>") 
+        html.append("</table>")        
+        
+        return ''.join(html)
+    
+
 class MetricsTable(list):
     ''' Represent result tables in HTML format for visualization '''
     
@@ -46,8 +101,8 @@ class MetricsTable(list):
         html.append("</thead>")       
         for line in self:
             html.append("<tr>") 
-            for key in main_header_order:  
-               html.append("<td>%s</td>" % line[key])
+            for key in main_header_order:
+                html.append("<td>%s</td>" % line[key])
             html.append("<tr>") 
         html.append("</table>")        
         
@@ -92,7 +147,7 @@ def query_api(query_txt):
     ''' Request results for a specific query '''
 
     query = {'query': query_txt}
-    output = requests.post('http://kubenode.internal.io:30004/v0/submission/graphql/', auth=auth, json=query).text
+    output = requests.post('http://kubenode.internal.io:30006/v0/submission/graphql/', auth=auth, json=query).text
     data = json.loads(output) 
 
     if 'data' not in data and 'errors' in data:
@@ -115,51 +170,88 @@ def query_project_samples(project_id):
 def query_sample(project_id, sample_id):
     ''' Query alignment files from one sample'''
 
-    query_txt = """query Test { sample (project_id: "%s", submitter_id: "%s") {
-                               submitter_id _aliquots_count aliquots {
-                               aliquot_concentration  _read_groups_count read_groups {
-                               _submitted_somatic_mutations_count submitted_somatic_mutations { file_name} 
-                               _submitted_unaligned_reads_files_count submitted_unaligned_reads_files { file_name} 
-                               _submitted_aligned_reads_files_count submitted_aligned_reads_files { file_name}
-                               _submitted_copy_number_files_count submitted_copy_number_files { file_name}} } }} """ % (project_id, sample_id)
+    query_txt = """{ sample (project_id: "%s", submitter_id: "%s") {
+                               submitter_id 
+                               _aliquots_count 
+                               aliquots {
+                               analytes {     
+                                  _read_groups_count 
+                                  read_groups {
+                                     _submitted_somatic_mutations_count submitted_somatic_mutations { file_name} 
+                                     _submitted_unaligned_reads_files_count submitted_unaligned_reads_files { file_name} 
+                                     _submitted_aligned_reads_files_count submitted_aligned_reads_files { file_name}
+                                     _submitted_copy_number_files_count submitted_copy_number_files { file_name}
+                                  } 
+                               }
+                               }
+                         }
+                    } """ % (project_id, sample_id)
 
     data = query_api(query_txt)   
 
     return data
 
+def query_field_counts(node, fields):
+    ''' Query summary counts for each data type '''
+    
+    query_txt = """{ case(first:0, with_path_to: {type: "%s" """ % (node) 
+    for f in fields:
+        query_txt += """,%s: "%s" """ % (f, fields[f])
+    query_txt += """}){ project_id }}"""
+    
+    data = query_api(query_txt)    
+    
+    summary = {}
+    if 'data' in data and 'case' in data['data']:
+        for d in data['data']['case']:
+            project = d["project_id"]
+            if project not in summary:
+                summary[project] = {} 
+
+            summary[project].setdefault('COUNT', 0)                 
+            summary[project]['COUNT'] += 1 
+    
+    return SummaryTable(summary)
+
 
 def query_summary_field(node, field, project_id=None):
     ''' Query summary counts for each data type '''
     
-    if project_id == None:
-        query_txt = """ query {project(first:0){project_id}}"""
-        projects = query_api(query_txt)['data']['project']    
+    if project_id != None:
+        query_txt = """query { %s(first:0, project_id: "%s") {%s}} """ % (node, project_id, field) 
     else:
-        projects = [{"project_id": project_id}]
+        query_txt = """query { %s(first:0) {%s project_id}} """ % (node, field)    
+    
+    data = query_api(query_txt)
     
     summary = {}
-    for p in projects:
-        
-        query_txt = """query { %s(first:0, project_id: "%s") {%s}} """ % (node, p["project_id"], field) 
-        
-        data = query_api(query_txt)
+    total = []
+    for d in data['data'][node]:
 
-        project = p["project_id"]
-        for d in data['data'][node]:
-          
-            field_name = str(d[field])
-            if field_name not in summary:
-                summary[field_name] = {} 
+        if isinstance(d[field], float):
+            d[field] = str(d[field])[:-2]        
+        
+        if 'project_id' in d:  
+            summary.setdefault(d['project_id'], {})
+            summary[d['project_id']].setdefault(d[field], 0)
+            summary[d['project_id']][d[field]] += 1
+            if d[field] not in total:
+                total.append(d[field])            
+        else:
+            summary.setdefault(d[field], 0)        
+            summary[d[field]] += 1
             
-            summary[field_name].setdefault(project, 0)                 
-            summary[field_name][project] += 1
-    
-    plot_summary(summary, field)
+    #plot_summary(summary, field)
+
+    if project_id != None:
+        plot_field_metrics(summary, field)
+    else:
+        plot_overall_metrics(summary, field, total)       
     
     return summary
 
 
-def plot_summary(summary_counts, field):
+def plot_field_metrics(summary_counts, field):
     ''' Plot summary results in a barplot ''' 
     
     N = len(summary_counts)
@@ -188,7 +280,46 @@ def plot_summary(summary_counts, field):
     
     plt.show()
     
+def plot_overall_metrics(summary_counts, field, totals):    
+    ''' Visualize summary results across projects in a barplot ''' 
+    
+    results = {}
+    projects = {}
+    for project in summary_counts:
+        
+        results[project] = []
+        projects.setdefault(project, 0)
+            
+        for value in totals:
+            if value in summary_counts[project]:
+                results[project].append(summary_counts[project][value])
+                projects[project] += summary_counts[project][value]
+            else:
+                results[project].append(0)
 
+    N = len(totals)
+    positions = np.arange(N) 
+    sorted_projects = sorted(projects, key=projects.get, reverse=True)
+    bar_size = 0.4
+    size_prop = (N/10) + 1
+    
+    plots = []
+    plt.figure(figsize=(2*N, N))
+    left = [0]*N
+    for pr in sorted_projects:
+        p = plt.barh(positions, results[pr], bar_size, left, align='center', alpha=1)        
+        plots.append(p[0])
+        left = map(add, left, results[pr])
+            
+    plt.title('Summary counts by (' + field + ')', fontsize=10*size_prop)
+    plt.xlabel('COUNTS', fontsize=10*size_prop)    
+    plt.ylabel(field.upper(), fontsize=10*size_prop)  
+    plt.yticks(positions, totals, fontsize=10*size_prop)    
+    plt.legend(plots, sorted_projects, fontsize=10*size_prop)
+           
+    plt.show() 
+    
+    
 def list_samples(project_id):
     ''' Retrieve samples included in one specific project'''
 
@@ -225,34 +356,24 @@ def query_project(project_id):
     return data
 
 
-def query_expectations(project_id, sample_id=None):
-    ''' Retrieve all expected mutations for one sample or one project'''
+def query_expectations(project_id, vcf_name):
+    ''' Retrieve all expected mutations associated to one VCF in one project'''
 
-    if sample_id:
-      query_txt = """query Test { 
-                          sample (project_id: "%s", submitter_id: "%s") { 
-                              submitter_id 
-                              _sample_expectations_count 
-                              sample_expectations(first:100) { 
-                                  expected_mutation_chromosome 
-                                  expected_mutation_position 
-                              }
-                          }
-                    }""" % (project_id, sample_id)
-    else:
-      query_txt = """query Test { 
-                          sample (project_id: "%s") { 
-                              submitter_id  
-                              _sample_expectations_count
-                              sample_expectations(first:100) { 
-                                  expected_mutation_chromosome 
-                                  expected_mutation_position 
-                              }
-                          }
-                    }""" % (project_id)    
+    query_txt = """{ 
+                   aliquot(project_id: "%s", with_path_to: {type: "submitted_somatic_mutation", file_name: "%s"}) {
+                       _contrived_expectations_count 
+                       samples{
+                           submitter_id
+                       }
+                       contrived_expectations(first:0) { 
+                          expected_mutation_chromosome 
+                          expected_mutation_position 
+                       }
+                   }
+                }""" % (project_id, vcf_name)
 
     data = query_api(query_txt) 
-
+    
     return data
 
 
@@ -268,10 +389,11 @@ def search_files(query_data, file_type):
         if not sample_id in files:
            files[sample_id] = []
         for a in s['aliquots']:
-            for rg in a['read_groups']:
-                for f in rg[node]:
-                    if 'file_name' in f:
-                       files[sample_id].append(f['file_name'].encode('ascii'))
+            for an in a['analytes']:  
+                for rg in an['read_groups']:
+                    for f in rg[node]:
+                        if 'file_name' in f:
+                            files[sample_id].append(f['file_name'].encode('ascii'))
 
     return files
 
@@ -353,21 +475,21 @@ def count_file_types(project_id, sample_id=None):
     return count_files
 
 
-def get_expected_mutations(project_id, sample_id=None):
+def get_expected_mutations(project_id, vcf_name):
     ''' Retrieve expected mutation from an expectation query ''' 
 
 
-    data = query_expectations(project_id, sample_id)
+    data = query_expectations(project_id, vcf_name)
 
     expectations = []
-    for s in data["data"]["sample"]:   
-        sample_id = s['submitter_id'].encode('ascii')
-        for a in s['sample_expectations']:
-            expectation = {'sample_id': sample_id,
-                           'expected_mutation_chromosome': a['expected_mutation_chromosome'].encode('ascii').replace('chr', ''),
-                           'expected_mutation_position': a['expected_mutation_position'].encode('ascii')}
+    for a in data["data"]["aliquot"]:   
+        sample_id = a["samples"][0]["submitter_id"]
+        for se in a["contrived_expectations"]:
+            expectation = {'sample_id': sample_id, 'vcf': vcf_name,
+                           'expected_mutation_chromosome': se['expected_mutation_chromosome'].encode('ascii').replace('chr', ''),
+                           'expected_mutation_position': se['expected_mutation_position'].encode('ascii')}
             expectations.append(expectation)
-
+ 
     return expectations
 
 
@@ -391,20 +513,20 @@ def find_germlines(expectations, baseline):
     return expectations
 
 
-def calculate_metrics_vcf(project, path, vcf_name, sample, baseline_vcf=None):
+def calculate_metrics_vcf(project, path, vcf_name, baseline_vcf=None):
     ''' Calculate sensitivity/specificity for one VCF file and its corresponding expectations ''' 
 
-    data = {'VCF File': '', 'Expectations': 0, 'True-Positive': 0, 'False-Positive': 0, 'Sensitivity': 0.0 , 'Specificity': 0.0}
+    data = {'Sample': '', 'VCF File': '', 'Expectations': 0, 'True-Positive': 0, 'False-Positive': 0, 'Sensitivity': 0.0 , 'Specificity': 0.0}
     vcf_path = path + vcf_name
     vcf_in = pysam.VariantFile(vcf_path, 'rb') 
 
-    expectations = get_expected_mutations(project, sample)
+    expectations = get_expected_mutations(project, vcf_name)
     if not expectations:
-      print "ERROR: There are no expected mutations for this project or sample" 
-
-    sample_expectations = [e for e in expectations if e['sample_id'] == sample]
+       print "Warning: There are no expected mutations for %s VCF file" % vcf_name
+       return {}
+    
     if baseline_vcf:
-      sample_expectations = find_germlines(sample_expectations, path + baseline_vcf)  
+       expectations = find_germlines(expectations, path + baseline_vcf)  
 
     TP = 0
     FP = 0
@@ -424,13 +546,15 @@ def calculate_metrics_vcf(project, path, vcf_name, sample, baseline_vcf=None):
            ref = '-'             
   
         if any(var['expected_mutation_chromosome'] == chrom \
-           and var['expected_mutation_position'] == pos for var in sample_expectations):
+           and var['expected_mutation_position'] == pos for var in expectations):
               TP += 1
         else:
               FP += 1
-
-    P  = len(sample_expectations)
+    
+    sample_id = [var['sample_id'] for var in expectations][0]
+    P  = len(expectations)
     TN = 169 - (TP + FP)
+    data['Sample'] = sample_id
     data['VCF File'] = vcf_name
     data['Expectations'] = P
     data['True-Positive'] = TP
@@ -438,17 +562,19 @@ def calculate_metrics_vcf(project, path, vcf_name, sample, baseline_vcf=None):
     data['Sensitivity'] = round(float(TP)/float(P), 3)
     data['Specificity'] = round(float(TN)/float(TN+FP),3)         
   
-    return data
+    return MetricsTable([data])
 
-def calculate_metrics_all_vcf(project, path, vcfs_files, baseline_vcf=None):
+def calculate_metrics_all_vcf(project, path, vcfs_files, samples=None, baseline_vcf=None):
     ''' Calculate sensitivity/specificity for a set of VCF files and create a table ''' 
 
     data_results = []
 
-    for sample in vcfs_files: 
-       for vcf in vcfs_files[sample]:       
-          data = calculate_metrics_vcf(project, path, vcf, sample, baseline_vcf)
-          data_results.append(data)
+    for sample in vcfs_files:
+       if sample in samples:
+           for vcf in vcfs_files[sample]:       
+              data = calculate_metrics_vcf(project, path, vcf, baseline_vcf)
+              if data:
+                 data_results = data_results + data
 
     table = MetricsTable(data_results)
 
