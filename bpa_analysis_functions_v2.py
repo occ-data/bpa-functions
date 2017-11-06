@@ -492,6 +492,16 @@ def get_expected_mutations(project_id, vcf_name):
  
     return expectations
 
+def get_variants(vcf_file):
+    ''' Read variants from a VCF file using pysam library '''
+    
+    vcf_back = pysam.VariantFile(vcf_file, 'rb') 
+
+    variants = []
+    for rec in vcf_back.fetch():
+        variants.append(rec)
+        
+    return variants
 
 def find_germlines(expectations, baseline):
     ''' Find potential germline variants from a baseline vcf (unexpected somatic variants) ''' 
