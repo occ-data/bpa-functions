@@ -113,12 +113,13 @@ def add_keys(filename):
     ''' Get auth from our secret keys '''
 
     global auth 
-    with open(filename,'r') as f:
-        secrets = json.load(f)
-    auth = get_auth(secrets['access_key'], secrets['secret_key'], 'submission')
+    
+    json_data=open(filename).read()
+    keys = json.loads(json_data)
+    auth = requests.post('https://data.bloodpac.org/user/credentials/cdis/access_token', json=keys)   
+    
 
-
-def get_files_from_bucket(project, profile, files_path, include_type=None):
+def get_files_from_bucket(project, profile, files_path, files=None):
     ''' Transfer data from object storage to the VM in the private subnet '''
 
     # Create folder
@@ -128,32 +129,49 @@ def get_files_from_bucket(project, profile, files_path, include_type=None):
     # Get bucket name and path
     bucket_name = project.replace('bpa-', 'BPA_')
     s3_path = 's3://bpa-data/' + bucket_name
-
+    
+    # If only one file or a pattern, create array
+    if isinstance(files, str):
+        files=[files]
+    
     # Getting files
     print "Getting files..."
-    cmd = ['aws', 's3', 'sync', s3_path, files_path, '--profile', profile]
-    if include_type:
-       cmd = cmd + ['--exclude', '*', '--include' , include_type]
-    
-    try:
-        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT)       
-    except Exception as e:
-        output = e.output
-        print "ERROR:" + output
+    if files:
+       for f in files:
+          s3_path = s3_path + '/'
+          cmd = ['aws', 's3', 'cp', s3_path, files_path, '--recursive', '--profile', profile, '--exclude', '*', '--include', f]
+          try:
+              output = subprocess.check_output(cmd, stderr=subprocess.STDOUT)       
+          except Exception as e:
+              output = e.output
+              print "ERROR:" + output          
+    else: 
+       cmd = ['aws', 's3', 'sync', s3_path, files_path, '--profile', profile]
+       try:
+          output = subprocess.check_output(cmd, stderr=subprocess.STDOUT)       
+       except Exception as e:
+          output = e.output
+          print "ERROR:" + output
     print "Finished"
 
-
-def query_api(query_txt):
+    
+def query_api(query_txt, variables = None):
     ''' Request results for a specific query '''
 
-    query = {'query': query_txt}
-    output = requests.post('http://kubenode.internal.io:30006/v0/submission/graphql/', auth=auth, json=query).text
-    data = json.loads(output) 
-
-    if 'data' not in data and 'errors' in data:
-        print query    
+    if variables == None:
+        query = {'query': query_txt}
+    else:
+        query = {'query': query_txt, 'variables': variables}        
     
-    return data
+    output = requests.post('https://data.bloodpac.org/api/v0/submission/graphql/' , 
+                           headers={'Authorization': 'bearer '+ auth.json()['access_token']}, 
+                           json=query).text
+    data = json.loads(output)    
+    
+    if 'errors' in data:
+        print data    
+    
+    return data  
 
 
 def query_project_samples(project_id):
@@ -492,16 +510,6 @@ def get_expected_mutations(project_id, vcf_name):
  
     return expectations
 
-def get_variants(vcf_file):
-    ''' Read variants from a VCF file using pysam library '''
-    
-    vcf_back = pysam.VariantFile(vcf_file, 'rb') 
-
-    variants = []
-    for rec in vcf_back.fetch():
-        variants.append(rec)
-        
-    return variants
 
 def find_germlines(expectations, baseline):
     ''' Find potential germline variants from a baseline vcf (unexpected somatic variants) ''' 
