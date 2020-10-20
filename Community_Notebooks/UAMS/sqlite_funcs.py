@@ -4,7 +4,7 @@ import sqlite3
 import csv
 import os
 import sys
-import bpa_analysis_functions_uams as ar 
+import bpa_analysis_functions_uams as ar
 
 def create_db_tables(path, drop_if_exists=True):
     """Creates mandatory sqlite3 DB tables and returns the location of the sqlite3 DB."""
@@ -12,7 +12,7 @@ def create_db_tables(path, drop_if_exists=True):
     # set filename for sqlite3 DB
     db_full_location = os.path.join(os.path.dirname(os.path.realpath(__file__)), path,
                                            'vcf.sqlite')
-    
+
     if drop_if_exists or not os.path.exists(db_full_location):
         # connect to DB
         conn = sqlite3.connect(db_full_location)
@@ -85,12 +85,12 @@ def import_vcf_data(db_full_location, path, vcf_file, metadata_id, import_only_p
     conn = sqlite3.connect(db_full_location)
 
     full_file_name = path + vcf_file
-    
-    print('\nOpening: ' + full_file_name)
+
+    print('\nOpening: ', full_file_name)
     with open(full_file_name, 'rb') as vcf_fp:  # open vcf_file
         vcf_reader = csv.reader(vcf_fp, delimiter='\t')  # create csv reader
 
-        print('Importing: ' + vcf_file)
+        print('Importing: ', vcf_file)
         file_row_count = 0
         insert_row_count = 0
         # advance to first record (skipping header info)
@@ -104,12 +104,12 @@ def import_vcf_data(db_full_location, path, vcf_file, metadata_id, import_only_p
 
             file_row_count += 1
             if file_row_count % 50 == 0:
-                print('Total File Records Read: ' + str(file_row_count) + '\r'),
+                print('Total File Records Read: ',str(file_row_count), '\r', end=' ')
                 sys.stdout.flush()
             insert_row_count += insert_vcf_row(conn, row, metadata_id)
 
-    print('Imported: ' + vcf_file + ' | Total File Records in File : ' + str(file_row_count) +
-          ' | Total Rows Inserted: ' + str(insert_row_count))
+    print('Imported: ' , vcf_file , ' | Total File Records in File : ' , str(file_row_count) ,
+          ' | Total Rows Inserted: ' , str(insert_row_count))
 
     if file_row_count != insert_row_count:
         print('ERROR: Rows in file did not equal rows inserted.')
@@ -196,7 +196,7 @@ def insert_annotation_row(conn, annotation_row, last_rowid):
 
 def insert_metadata_row(db_full_location, case_name, case_id, experimental_strategy, file_name):
     """Inserts one row of metadata into the metadata table."""
-    
+
     # connect to DB
     conn = sqlite3.connect(db_full_location)
 
@@ -207,23 +207,23 @@ def insert_metadata_row(db_full_location, case_name, case_id, experimental_strat
                    'FROM metadata '
                    'WHERE case_name = ? '
                    'AND case_id = ? '
-                   'AND experimental_strategy = ? ', 
+                   'AND experimental_strategy = ? ',
                    (case_name, case_id, experimental_strategy))
-    
+
     rows = cursor.fetchall()
-    
+
     # no match on case_name, case_id, experimental_strategy
     if len(rows) == 0:
-        
+
         cursor.execute('INSERT INTO metadata '
                        '(case_name, case_id, experimental_strategy, file_name) '
                        'VALUES (?, ?, ?, ?)', (case_name, case_id, experimental_strategy, file_name))
         conn.commit()
 
         print("Row inserted into metadata table.")
-        
+
         return cursor.lastrowid
-        
+
     # BID in the file name indicates files belong to the same study.
     # Parse the file_name field (csv list of file names) to see if any file's BID matches the
     # BID of the file the user is attempting to import; if so we will append this file to the csv
@@ -231,29 +231,29 @@ def insert_metadata_row(db_full_location, case_name, case_id, experimental_strat
         # get BID from file_name
         #file_name_substring = file_name.split("BID-", 1)[1]
         #file_name_bid = file_name_substring.split("-", 1)[0]
-        
+
         file_name_bid = (file_name.split("BID-", 1)[1]).split("-", 1)[0]
-        
+
         for row in rows:
 
             file_list = str(row[4]).split(",")
-            
+
             # file already exists, abort
             if file_name in file_list:
                 print("File already imported.  Abort insert to metadata table.")
-                return -1            
-          
+                return -1
+
             else:
                 for f in file_list:
-                    
+
                     #f_substring = f.split("BID-", 1)[1]
                     #f_bid = f_substring.split("-", 1)[0]
-                    
+
                     f_bid = (f.split("BID-", 1)[1]).split("-", 1)[0]
 
-                    # file found with a matching BID , append this file_name 
-                    # to the file_name column as csv 
-                    if file_name_bid == f_bid:    
+                    # file found with a matching BID , append this file_name
+                    # to the file_name column as csv
+                    if file_name_bid == f_bid:
                         updated_file_name = row[4] + "," + file_name
 
                         cursor.execute('UPDATE metadata '
@@ -262,23 +262,23 @@ def insert_metadata_row(db_full_location, case_name, case_id, experimental_strat
 
                         conn.commit()
 
-                        print("Metadata table row " + str(row[0]) + " updated.")
+                        print("Metadata table row " , str(row[0]) , " updated.")
 
                         return row[0]
-          
+
             # no matches found from rows with the same case and experimental strategy with the same BID
             # insert a new record
             cursor.execute('INSERT INTO metadata '
                        '(case_name, case_id, experimental_strategy, file_name) '
                        'VALUES (?, ?, ?, ?)', (case_name, case_id, experimental_strategy, file_name))
-                               
+
             conn.commit()
 
             print("Row inserted into metadata table.")
-            
+
             return cursor.lastrowid
-        
-        
+
+
 def get_tag_value(tag_string, format_string, sample_string):
     """Returns the value of the tag in a given sample."""
     split_format_string = format_string.split(':')
@@ -298,8 +298,8 @@ def get_tag_value(tag_string, format_string, sample_string):
         return split_sample_string[tag_index]
     else:
         return None
-        
-        
+
+
 def import_case_sqlite(db_full_location, project, profile, path, case_dict, case):
     case_id = case_dict.get(case)
     case_vcfs = ar.dict_VCF_files_by_case(project, case)
@@ -314,4 +314,3 @@ def import_case_sqlite(db_full_location, project, profile, path, case_dict, case
                 import_vcf_data(db_full_location, path, extracted_file_name, metadata_id)
             else:
                   print("File already imported.  Abort insert to vcf & annotations table.")
-            
