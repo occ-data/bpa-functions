@@ -7,11 +7,11 @@ s_nodes = ["immunoassays","quantification_assays"]
 head_s_nodes = ["immunoassay","quantification_assay"]
 
 def hasNextNode(data):
-	child = list(  (set(data.keys()) & set(nodes) )  | (set(data.keys()) & set(head) ) )
+	child = list((set(data.keys()) & set(nodes) )  | (set(data.keys()) & set(head) ) )
 	return ( len(child) > 0 )
 
 def hasSNode(data):
-	child = list(  (set(data.keys()) & set(s_nodes) ) | (set(data.keys()) & set(head_s_nodes) ) )
+	child = list((set(data.keys()) & set(s_nodes) ) | (set(data.keys()) & set(head_s_nodes) ) )
 	return ( len(child) > 0)
 
 
@@ -48,5 +48,3 @@ def jsonToDF(data):
 					for qcol in data[childname][qa].keys():
 						df[qcol] = data[childname][qa][qcol]
 	return df
-
-
